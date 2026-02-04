@@ -133,6 +133,7 @@ class ColumnWiseDatasetBuilder:
     def build_preview(self, *, num_records: int) -> pd.DataFrame:
         self._run_model_health_check_if_needed()
         self._run_mcp_tool_check_if_needed()
+        self._run_pre_generation_processors()
 
         generators = self._initialize_generators()
         group_id = uuid.uuid4().hex
@@ -150,10 +151,15 @@ class ColumnWiseDatasetBuilder:
         return dataset
 
     def process_preview(self, dataset: pd.DataFrame) -> pd.DataFrame:
-        return self._run_processors(
+        df = self._run_processors(
             stage=BuildStage.POST_BATCH,
             dataframe=dataset.copy(),
             current_batch_number=None,  # preview mode does not have a batch number
+        )
+        return self._run_processors(
+            stage=BuildStage.POST_GENERATION,
+            dataframe=df,
+            current_batch_number=None,
         )
 
     def _initialize_generators(self) -> list[ColumnGenerator]:

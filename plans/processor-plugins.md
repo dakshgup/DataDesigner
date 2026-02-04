@@ -1,7 +1,7 @@
 # Plan: Processor Plugins with Global Stages
 
 Created: 2026-02-03
-Status: Draft
+Status: Iterating and Refining
 
 ## Goal
 
@@ -9,12 +9,12 @@ Extend the processor system to support global preprocessing (before generation) 
 
 ## Success Criteria
 
-- [ ] `PRE_GENERATION` stage runs once on full seed data before batching/generation
-- [ ] `POST_GENERATION` stage runs once on final dataset after all batches complete
-- [ ] `PluginType.PROCESSOR` enables external processor plugins
-- [ ] ProcessorRegistry loads plugins from entry points
-- [ ] Demo plugin package demonstrates both preprocessing and postprocessing
-- [ ] Existing `POST_BATCH` behavior unchanged
+- [x] `PRE_GENERATION` stage runs once on full seed data before batching/generation
+- [x] `POST_GENERATION` stage runs once on final dataset after all batches complete
+- [x] `PluginType.PROCESSOR` enables external processor plugins
+- [x] ProcessorRegistry loads plugins from entry points
+- [x] Demo plugin package demonstrates both preprocessing and postprocessing
+- [x] Existing `POST_BATCH` behavior unchanged
 
 ## Implementation Steps
 
@@ -22,8 +22,8 @@ Extend the processor system to support global preprocessing (before generation) 
 
 Update processor configuration to accept new stages.
 
-- [ ] Add `PRE_GENERATION` and `POST_GENERATION` to `SUPPORTED_STAGES` in processors.py
-- [ ] Add unit tests verifying `ProcessorConfig` accepts the new stage values
+- [x] Add `PRE_GENERATION` and `POST_GENERATION` to `SUPPORTED_STAGES` in processors.py
+- [x] Add unit tests verifying `ProcessorConfig` accepts the new stage values
 
 **Suggestion**: Check if `BuildStage` enum already has these values defined elsewhere before adding.
 
@@ -31,32 +31,32 @@ Update processor configuration to accept new stages.
 
 Implement the actual execution of processors at the new stages.
 
-- [ ] Add `_run_pre_generation_processors()` method
+- [x] Add `_run_pre_generation_processors()` method
   - Load full seed dataset before batch loop
   - Apply PRE_GENERATION processors sequentially
   - Replace the seed reader with an in-memory version containing processed data
   - **Suggestion**: Look for existing in-memory seed reader implementations (e.g., `DataFrameSeedReader`)
 
-- [ ] Add `_run_post_generation_processors()` method
+- [x] Add `_run_post_generation_processors()` method
   - Load the final combined dataset after all batches complete
   - Apply POST_GENERATION processors sequentially
   - Rewrite the final dataset with processed results
   - **Suggestion**: Check how existing artifact storage handles dataset loading/writing
 
-- [ ] Integrate calls into the `build()` method at appropriate points
-- [ ] Add integration tests for both flows
+- [x] Integrate calls into the `build()` method at appropriate points
+- [x] Add integration tests for both flows
 
 ### Step 3: Add Processor Plugin Support
 
 Enable third-party processor plugins through the existing plugin system.
 
-- [ ] Add `PluginType.PROCESSOR` to the plugin types enum
-- [ ] Update `discriminator_field` property to return `"processor_type"` for processors
-- [ ] Update `ProcessorRegistry` to discover and load processor plugins
+- [x] Add `PluginType.PROCESSOR` to the plugin types enum
+- [x] Update `discriminator_field` property to return `"processor_type"` for processors
+- [x] Update `ProcessorRegistry` to discover and load processor plugins
   - **Suggestion**: Follow the pattern used for column generator plugins
   - Use string keys for plugin processors (not enum values)
 
-- [ ] Inject plugin processor configs into the `ProcessorConfigT` type union
+- [x] Inject plugin processor configs into the `ProcessorConfigT` type union
   - Follow the existing `_types` pattern used for columns and seed sources
 
 **Follow the `_types` Module Pattern**:
@@ -66,9 +66,9 @@ The codebase separates base classes from type unions with plugin injection:
 - `seed_source.py` (base) → `seed_source_types.py` (union + injection)
 
 Do the same for processors:
-- [ ] Keep `processors.py` with base classes and concrete configs
-- [ ] Create `processor_types.py` for `ProcessorConfigT` with plugin injection
-- [ ] Plugin configs import from `processors.py` (no circular dependency)
+- [x] Keep `processors.py` with base classes and concrete configs
+- [x] Create `processor_types.py` for `ProcessorConfigT` with plugin injection
+- [x] Plugin configs import from `processors.py` (no circular dependency)
 
 **Threading Note**:
 
@@ -78,18 +78,18 @@ If you encounter deadlocks during plugin discovery with nested imports, the `Plu
 
 Create a separate package demonstrating both processor types.
 
-- [ ] Create package structure under `demo/data_designer_demo_processors/`
-- [ ] Implement `RegexFilterProcessor` (PRE_GENERATION)
+- [x] Create package structure under `demo/data_designer_demo_processors/`
+- [x] Implement `RegexFilterProcessor` (PRE_GENERATION)
   - Config: column, pattern, invert flag
   - Filters rows based on regex matching
-- [ ] Implement `SemanticDedupProcessor` (POST_GENERATION)
+- [x] Implement `SemanticDedupProcessor` (POST_GENERATION)
   - Config: column, similarity_threshold, model_name
   - Uses embeddings to find and remove similar rows
   - **Suggestion**: Use sentence-transformers with a small model like `all-MiniLM-L6-v2`
 
-- [ ] Configure entry points in `pyproject.toml` under `data_designer.plugins`
-- [ ] Add unit tests for each processor
-- [ ] Add README with installation and usage examples
+- [x] Configure entry points in `pyproject.toml` under `data_designer.plugins`
+- [x] Add unit tests for each processor
+- [x] Add README with installation and usage examples
 
 **Logging Suppression** (for sentence-transformers):
 
@@ -103,13 +103,13 @@ Sentence-transformers emits progress bars and warnings when loading models. Supp
 
 Create a simple, short demo that tests all features end-to-end.
 
-- [ ] Use `#%%` cell markers for IDE compatibility
-- [ ] Keep the demo minimal - just enough to verify the feature works
-- [ ] Include sample seed data with rows to filter (PRE_GENERATION test)
-- [ ] Add an LLM column to generate content, use the `openai-text` model
-- [ ] Configure both PRE_GENERATION and POST_GENERATION processors
-- [ ] **Run the demo and fix any issues** - don't just write it, execute it
-- [ ] Verify the output shows filtering and deduplication working
+- [x] Use `#%%` cell markers for IDE compatibility
+- [x] Keep the demo minimal - just enough to verify the feature works
+- [x] Include sample seed data with rows to filter (PRE_GENERATION test)
+- [x] Add an LLM column to generate content, use the `openai-text` model
+- [x] Configure both PRE_GENERATION and POST_GENERATION processors
+- [x] **Run the demo and fix any issues** - don't just write it, execute it
+- [x] Verify the output shows filtering and deduplication working
 
 **Important**: The demo must actually run successfully. Test it before considering this step complete.
 
@@ -119,9 +119,9 @@ Create a simple, short demo that tests all features end-to-end.
 
 Update existing documentation to cover new capabilities.
 
-- [ ] Update processor concepts doc with new stages table
-- [ ] Update plugins overview to mention processor plugins
-- [ ] Include example entry point configuration
+- [x] Update processor concepts doc with new stages table
+- [x] Update plugins overview to mention processor plugins
+- [x] Include example entry point configuration
 
 ## Testing Strategy
 
@@ -155,3 +155,21 @@ Demo:
 Docs:
 - `docs/concepts/processors.md`
 - `docs/plugins/overview.md`
+
+---
+
+## Iterating and Refining
+
+### Issue 1: Preview does not apply PRE_GENERATION / POST_GENERATION processors
+
+**Problem**: `build_preview()` and `process_preview()` do not call the new global-stage processors. This means users previewing their data pipeline won't see the effects of filtering or deduplication until they run a full build.
+
+**Investigation**:
+- `build()` calls `_run_pre_generation_processors()` before generation and `_run_post_generation_processors()` after
+- `build_preview()` skips both
+- `process_preview()` only applies `POST_BATCH` processors
+
+**Fix**:
+- [x] Add `_run_pre_generation_processors()` call to `build_preview()` before `_initialize_generators()`
+- [x] Update `process_preview()` to also run `POST_GENERATION` processors after `POST_BATCH`
+- [x] Add tests for preview with global-stage processors

@@ -492,3 +492,80 @@ def test_run_pre_generation_processors_skips_when_no_seed_reader(stub_resource_p
 
     # Processor should not be called when no seed reader
     mock_processor.process.assert_not_called()
+
+
+def test_build_preview_runs_pre_generation_processors(stub_resource_provider, stub_model_configs, tmp_path):
+    """Test that build_preview runs PRE_GENERATION processors."""
+    from data_designer.config.seed_source import DataFrameSeedSource, LocalFileSeedSource
+    from data_designer.engine.resources.seed_reader import DataFrameSeedReader
+
+    # Set up seed reader with test data
+    seed_df = pd.DataFrame({"seed_id": [1, 2, 3, 4, 5], "text": ["a", "b", "c", "d", "e"]})
+    seed_source = DataFrameSeedSource(df=seed_df)
+    seed_reader = DataFrameSeedReader()
+    seed_reader.attach(seed_source, Mock())
+    stub_resource_provider.seed_reader = seed_reader
+
+    # Write seed file to tmp_path
+    seed_path = tmp_path / "seed.parquet"
+    seed_df.to_parquet(seed_path, index=False)
+
+    config_builder = DataDesignerConfigBuilder(model_configs=stub_model_configs)
+    config_builder.with_seed_dataset(LocalFileSeedSource(path=str(seed_path)))
+    config_builder.add_column(SamplerColumnConfig(name="uuid", sampler_type="uuid", params=UUIDSamplerParams()))
+
+    builder = ColumnWiseDatasetBuilder(
+        data_designer_config=config_builder.build(),
+        resource_provider=stub_resource_provider,
+    )
+
+    # Mock everything to isolate the test
+    builder._run_model_health_check_if_needed = Mock()
+    builder._run_mcp_tool_check_if_needed = Mock()
+    builder._run_pre_generation_processors = Mock()
+    builder._initialize_generators = Mock(return_value=[])
+    builder.batch_manager.start = Mock()
+    builder._run_batch = Mock()
+    builder.batch_manager.get_current_batch = Mock(return_value=pd.DataFrame())
+    builder.batch_manager.reset = Mock()
+    builder._resource_provider.model_registry.get_model_usage_stats = Mock(return_value={})
+
+    builder.build_preview(num_records=5)
+
+    builder._run_pre_generation_processors.assert_called_once()
+
+
+def test_process_preview_runs_post_generation_processors(stub_resource_provider, stub_model_configs):
+    """Test that process_preview runs POST_GENERATION processors after POST_BATCH."""
+    from data_designer.engine.processing.processors.base import Processor
+
+    config_builder = DataDesignerConfigBuilder(model_configs=stub_model_configs)
+    config_builder.add_column(SamplerColumnConfig(name="id", sampler_type="uuid", params=UUIDSamplerParams()))
+
+    builder = ColumnWiseDatasetBuilder(
+        data_designer_config=config_builder.build(),
+        resource_provider=stub_resource_provider,
+    )
+
+    # Create mock processors for both stages (must accept current_batch_number kwarg)
+    post_batch_processor = Mock(spec=Processor)
+    post_batch_processor.name = "post_batch"
+    post_batch_processor.process.side_effect = lambda df, **kwargs: df.assign(post_batch_applied=True)
+
+    post_gen_processor = Mock(spec=Processor)
+    post_gen_processor.name = "post_gen"
+    post_gen_processor.process.side_effect = lambda df, **kwargs: df.assign(post_gen_applied=True)
+
+    builder._processors[BuildStage.POST_BATCH] = [post_batch_processor]
+    builder._processors[BuildStage.POST_GENERATION] = [post_gen_processor]
+
+    input_df = pd.DataFrame({"id": [1, 2, 3]})
+    result = builder.process_preview(input_df)
+
+    # Both processors should have been called
+    post_batch_processor.process.assert_called_once()
+    post_gen_processor.process.assert_called_once()
+
+    # Result should have both columns added
+    assert "post_batch_applied" in result.columns
+    assert "post_gen_applied" in result.columns
