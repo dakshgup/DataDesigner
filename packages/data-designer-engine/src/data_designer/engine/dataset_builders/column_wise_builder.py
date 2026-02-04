@@ -22,6 +22,7 @@ from data_designer.config.processors import (
     ProcessorConfig,
     ProcessorType,
 )
+from data_designer.config.seed_source import DataFrameSeedSource
 from data_designer.engine.column_generators.generators.base import (
     ColumnGenerator,
     ColumnGeneratorWithModel,
@@ -29,7 +30,7 @@ from data_designer.engine.column_generators.generators.base import (
 )
 from data_designer.engine.column_generators.utils.generator_classification import column_type_is_model_generated
 from data_designer.engine.compiler import compile_data_designer_config
-from data_designer.engine.dataset_builders.artifact_storage import SDG_CONFIG_FILENAME, ArtifactStorage
+from data_designer.engine.dataset_builders.artifact_storage import SDG_CONFIG_FILENAME, ArtifactStorage, BatchStage
 from data_designer.engine.dataset_builders.errors import DatasetGenerationError, DatasetProcessingError
 from data_designer.engine.dataset_builders.multi_column_configs import MultiColumnConfig
 from data_designer.engine.dataset_builders.utils.concurrency import ConcurrentThreadExecutor
@@ -41,6 +42,8 @@ from data_designer.engine.processing.processors.base import Processor
 from data_designer.engine.processing.processors.drop_columns import DropColumnsProcessor
 from data_designer.engine.registry.data_designer_registry import DataDesignerRegistry
 from data_designer.engine.resources.resource_provider import ResourceProvider
+from data_designer.engine.resources.seed_reader import DataFrameSeedReader
+from data_designer.engine.secret_resolver import PlaintextResolver
 from data_designer.lazy_heavy_imports import pd
 
 if TYPE_CHECKING:
@@ -99,6 +102,7 @@ class ColumnWiseDatasetBuilder:
     ) -> Path:
         self._run_model_health_check_if_needed()
         self._run_mcp_tool_check_if_needed()
+        self._run_pre_generation_processors()
         self._write_builder_config()
         generators = self._initialize_generators()
         start_time = time.perf_counter()
@@ -117,6 +121,7 @@ class ColumnWiseDatasetBuilder:
             self._write_processed_batch(df_batch)
             self.batch_manager.finish_batch(on_batch_complete)
         self.batch_manager.finish()
+        self._run_post_generation_processors()
 
         model_usage_stats = self._resource_provider.model_registry.get_model_usage_stats(
             time.perf_counter() - start_time
@@ -337,6 +342,48 @@ class ColumnWiseDatasetBuilder:
                     f"🛑 Failed to process dataset with processor {processor.name} in stage {stage}: {e}"
                 ) from e
         return dataframe
+
+    def _run_pre_generation_processors(self) -> None:
+        """Run PRE_GENERATION processors on the full seed dataset before batch loop."""
+        if not self._processors[BuildStage.PRE_GENERATION]:
+            return
+        if self._resource_provider.seed_reader is None:
+            logger.warning("⚠️ PRE_GENERATION processors configured but no seed dataset provided. Skipping.")
+            return
+
+        logger.info("⏳ Running PRE_GENERATION processors on seed data...")
+        seed_reader = self._resource_provider.seed_reader
+        conn = seed_reader.create_duckdb_connection()
+        df = conn.execute(f"SELECT * FROM '{seed_reader.get_dataset_uri()}'").fetchdf()
+
+        df = self._run_processors(stage=BuildStage.PRE_GENERATION, dataframe=df)
+
+        new_source = DataFrameSeedSource(df=df)
+        new_reader = DataFrameSeedReader()
+        new_reader.attach(new_source, PlaintextResolver())
+        self._resource_provider.seed_reader = new_reader
+        logger.info(f"✅ PRE_GENERATION processors complete. Seed data now has {len(df)} rows.")
+
+    def _run_post_generation_processors(self) -> None:
+        """Run POST_GENERATION processors on the final combined dataset."""
+        if not self._processors[BuildStage.POST_GENERATION]:
+            return
+
+        logger.info("⏳ Running POST_GENERATION processors on final dataset...")
+        df = self.artifact_storage.load_dataset()
+
+        df = self._run_processors(stage=BuildStage.POST_GENERATION, dataframe=df)
+
+        # Rewrite the final dataset as a single file
+        import shutil
+
+        shutil.rmtree(self.artifact_storage.final_dataset_path)
+        self.artifact_storage.write_batch_to_parquet_file(
+            batch_number=0,
+            dataframe=df,
+            batch_stage=BatchStage.FINAL_RESULT,
+        )
+        logger.info(f"✅ POST_GENERATION processors complete. Final dataset has {len(df)} rows.")
 
     def _worker_error_callback(self, exc: Exception, *, context: dict | None = None) -> None:
         """If a worker fails, we can handle the exception here."""

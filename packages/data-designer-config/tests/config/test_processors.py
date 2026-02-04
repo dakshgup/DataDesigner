@@ -105,6 +105,12 @@ def test_schema_transform_processor_config_serialization():
     assert config_restored.template == config.template
 
 
+@pytest.mark.parametrize("stage", [BuildStage.PRE_GENERATION, BuildStage.POST_GENERATION])
+def test_processor_config_accepts_global_stages(stage):
+    config = DropColumnsProcessorConfig(name="test_processor", build_stage=stage, column_names=["col1"])
+    assert config.build_stage == stage
+
+
 def test_get_processor_config_from_kwargs():
     # Test successful creation
     config_drop_columns = get_processor_config_from_kwargs(

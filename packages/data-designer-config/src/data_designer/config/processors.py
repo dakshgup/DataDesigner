@@ -9,13 +9,12 @@ from enum import Enum
 from typing import Any, Literal
 
 from pydantic import Field, field_validator
-from typing_extensions import TypeAlias
 
 from data_designer.config.base import ConfigBase
 from data_designer.config.dataset_builders import BuildStage
 from data_designer.config.errors import InvalidConfigError
 
-SUPPORTED_STAGES = [BuildStage.POST_BATCH]
+SUPPORTED_STAGES = [BuildStage.POST_BATCH, BuildStage.PRE_GENERATION, BuildStage.POST_GENERATION]
 
 
 class ProcessorType(str, Enum):
@@ -143,6 +142,3 @@ class SchemaTransformProcessorConfig(ProcessorConfig):
             if "not JSON serializable" in str(e):
                 raise InvalidConfigError("Template must be JSON serializable")
         return v
-
-
-ProcessorConfigT: TypeAlias = DropColumnsProcessorConfig | SchemaTransformProcessorConfig

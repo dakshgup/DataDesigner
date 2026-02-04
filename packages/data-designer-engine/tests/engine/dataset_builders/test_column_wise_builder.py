@@ -388,3 +388,107 @@ def test_fan_out_with_threads_uses_early_shutdown_settings_from_resource_provide
     assert call_kwargs["shutdown_error_rate"] == expected_rate
     assert call_kwargs["shutdown_error_window"] == shutdown_error_window
     assert call_kwargs["disable_early_shutdown"] == disable_early_shutdown
+
+
+def test_run_pre_generation_processors_filters_seed_data(stub_resource_provider, stub_model_configs, tmp_path):
+    """Test that PRE_GENERATION processors are applied to seed data before generation."""
+    from data_designer.config.seed_source import DataFrameSeedSource, LocalFileSeedSource
+    from data_designer.engine.processing.processors.base import Processor
+    from data_designer.engine.resources.seed_reader import DataFrameSeedReader
+
+    # Set up seed reader with test data
+    seed_df = pd.DataFrame({"seed_id": [1, 2, 3, 4, 5], "value": ["a", "b", "c", "d", "e"]})
+    seed_source = DataFrameSeedSource(df=seed_df)
+    seed_reader = DataFrameSeedReader()
+    seed_reader.attach(seed_source, Mock())
+    stub_resource_provider.seed_reader = seed_reader
+
+    # Create a mock PRE_GENERATION processor that filters rows
+    mock_processor = Mock(spec=Processor)
+    mock_processor.name = "filter_processor"
+    mock_processor.process.return_value = seed_df[seed_df["seed_id"] > 2]
+
+    # Write seed file to tmp_path
+    seed_path = tmp_path / "seed.parquet"
+    seed_df.to_parquet(seed_path, index=False)
+
+    config_builder = DataDesignerConfigBuilder(model_configs=stub_model_configs)
+    config_builder.with_seed_dataset(LocalFileSeedSource(path=str(seed_path)))
+    config_builder.add_column(SamplerColumnConfig(name="uuid", sampler_type="uuid", params=UUIDSamplerParams()))
+
+    builder = ColumnWiseDatasetBuilder(
+        data_designer_config=config_builder.build(),
+        resource_provider=stub_resource_provider,
+    )
+    builder._processors[BuildStage.PRE_GENERATION] = [mock_processor]
+
+    builder._run_pre_generation_processors()
+
+    # Verify processor was called
+    mock_processor.process.assert_called_once()
+
+    # Verify seed reader was replaced
+    new_seed_reader = stub_resource_provider.seed_reader
+    assert isinstance(new_seed_reader, DataFrameSeedReader)
+
+    # Verify the new seed data has fewer rows
+    conn = new_seed_reader.create_duckdb_connection()
+    result_df = conn.execute(f"SELECT * FROM '{new_seed_reader.get_dataset_uri()}'").fetchdf()
+    assert len(result_df) == 3
+
+
+def test_run_post_generation_processors_modifies_final_dataset(stub_resource_provider, stub_model_configs):
+    """Test that POST_GENERATION processors are applied to the final dataset."""
+    from data_designer.engine.processing.processors.base import Processor
+
+    # Create test parquet files
+    final_df = pd.DataFrame({"id": [1, 2, 3, 4, 5], "value": ["a", "b", "c", "d", "e"]})
+    stub_resource_provider.artifact_storage.mkdir_if_needed(stub_resource_provider.artifact_storage.final_dataset_path)
+    final_df.to_parquet(stub_resource_provider.artifact_storage.final_dataset_path / "batch_00000.parquet", index=False)
+
+    # Create a mock POST_GENERATION processor that filters rows
+    mock_processor = Mock(spec=Processor)
+    mock_processor.name = "dedup_processor"
+    mock_processor.process.return_value = final_df[final_df["id"] > 2]
+
+    config_builder = DataDesignerConfigBuilder(model_configs=stub_model_configs)
+    config_builder.add_column(SamplerColumnConfig(name="id", sampler_type="uuid", params=UUIDSamplerParams()))
+
+    builder = ColumnWiseDatasetBuilder(
+        data_designer_config=config_builder.build(),
+        resource_provider=stub_resource_provider,
+    )
+    builder._processors[BuildStage.POST_GENERATION] = [mock_processor]
+
+    builder._run_post_generation_processors()
+
+    # Verify processor was called
+    mock_processor.process.assert_called_once()
+
+    # Verify final dataset was rewritten with fewer rows
+    result_df = stub_resource_provider.artifact_storage.load_dataset()
+    assert len(result_df) == 3
+
+
+def test_run_pre_generation_processors_skips_when_no_seed_reader(stub_resource_provider, stub_model_configs):
+    """Test that PRE_GENERATION processors are skipped when no seed reader is configured."""
+    from data_designer.engine.processing.processors.base import Processor
+
+    stub_resource_provider.seed_reader = None
+
+    mock_processor = Mock(spec=Processor)
+    mock_processor.name = "filter_processor"
+
+    config_builder = DataDesignerConfigBuilder(model_configs=stub_model_configs)
+    config_builder.add_column(SamplerColumnConfig(name="id", sampler_type="uuid", params=UUIDSamplerParams()))
+
+    builder = ColumnWiseDatasetBuilder(
+        data_designer_config=config_builder.build(),
+        resource_provider=stub_resource_provider,
+    )
+    builder._processors[BuildStage.PRE_GENERATION] = [mock_processor]
+
+    builder._run_pre_generation_processors()
+
+    # Processor should not be called when no seed reader
+    mock_processor.process.assert_not_called()
