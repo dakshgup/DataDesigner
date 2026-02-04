@@ -173,3 +173,33 @@ Docs:
 - [x] Add `_run_pre_generation_processors()` call to `build_preview()` before `_initialize_generators()`
 - [x] Update `process_preview()` to also run `POST_GENERATION` processors after `POST_BATCH`
 - [x] Add tests for preview with global-stage processors
+
+### Issue 2: Is RLock necessary in PluginRegistry?
+
+**Question**: The plan suggested changing `Lock` to `RLock` in `PluginRegistry`. Is this actually needed?
+
+**Investigation**:
+
+The `PluginRegistry` singleton uses a lock in three places:
+- `__new__`: double-checked locking for singleton creation
+- `__init__`: protects `_discover()` call
+- `reset()`: resets singleton state
+
+The potential deadlock scenario:
+1. `PluginRegistry.__init__` acquires lock
+2. `_discover()` calls `ep.load()` to load a plugin module
+3. The plugin imports `data_designer.config.config_builder` (or any module using the config API)
+4. That imports `column_types.py`, `processor_types.py`, `seed_source_types.py`
+5. Each of those calls `PluginManager()` → `PluginRegistry()` at module level
+6. `PluginRegistry().__init__` tries to acquire lock again (same thread)
+7. With `Lock`: deadlock (same thread blocked). With `RLock`: succeeds.
+
+Import chain that triggers this:
+```
+plugin.py → data_designer.config.config_builder
+          → data_designer.config.column_types (calls PluginManager())
+          → data_designer.config.processor_types (calls PluginManager())
+          → data_designer.config.seed_source_types (calls PluginManager())
+```
+
+**Conclusion**: YES, `RLock` is necessary. Any third-party plugin that imports from the `data_designer.config` public API (e.g., `DataDesignerConfigBuilder`, `DataDesignerConfig`) would trigger this re-entry. Using a regular `Lock` would cause a deadlock.
